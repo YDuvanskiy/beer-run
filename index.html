@@ -97,12 +97,21 @@
             align-items: flex-end;
         }
         
+        /* ИЗМЕНЕНИЯ ДЛЯ ФИКСИРОВАННОЙ ШИРИНЫ И СКРОЛЛИНГА */
         #dialogue-text-content {
             border: 3px solid #00ff00;
             background-color: #050505;
             padding: 15px;
-            width: 90%;
-            min-height: 80px;
+            width: 600px; /* Фиксированная ширина */
+            max-width: 90%; /* Адаптивность для узких экранов */
+            height: 180px; /* Фиксированная высота для скроллинга */
+            overflow-y: auto; /* Включение скроллинга */
+            
+            /* Направление текста: новые элементы появляются снизу и уползают вверх */
+            display: flex;
+            flex-direction: column-reverse; 
+            justify-content: flex-start; /* Прижимает элементы к низу */
+
             box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
             line-height: 1.4;
             font-size: 1.1em;
@@ -115,6 +124,23 @@
             line-height: 1.6;
             color: #fff;
         }
+        
+        /* Стили для контейнера кнопки внутри диалога */
+        .dialogue-button-container {
+            width: 100%;
+            text-align: center;
+            margin-top: 10px;
+            order: 2; /* Убедимся, что кнопка идет после текста (т.е. внизу) */
+        }
+        
+        /* Стили для текста, который печатается внутри #dialogue-text-content */
+        .dialogue-text-wrapper {
+             white-space: pre-wrap;
+             word-break: break-word;
+             width: 100%;
+             order: 1; /* Текст идет первым (т.е. над кнопкой) */
+        }
+
 
         /* НОВЫЕ СТИЛИ ДЛЯ ИКОНОК ПЕРСОНАЖЕЙ */
         .speaker-icon {
@@ -197,6 +223,7 @@
             <div id="speaker-right" class="speaker-icon" style="opacity: 0;"></div> 
             
             <div id="dialogue-box">
+                <!-- Контент внутри dialogue-text-content будет гибким (flex-direction: column-reverse) -->
                 <div id="dialogue-text-content"></div>
             </div>
         </div>
@@ -240,6 +267,7 @@
         let gameState = {
             isRunning: false, // Флаг для движения/коллизий
             isDialogue: false, // Флаг для активного диалога
+            isTyping: false, // НОВЫЙ ФЛАГ для остановки звука пишущей машинки при проигрыше
             distance: 0,
             yuri: { x: 50, y: 0, width: 30, height: 60, dy: 0, onGround: true, isSlowing: false },
             groundY: GAME_HEIGHT - 40,
@@ -276,9 +304,9 @@
             }
         }
 
-        // Ретро-блип
+        // Ретро-блип (Звук пишущей машинки)
         function playTypewriterSound() {
-            if (!isAudioReady) return;
+            if (!isAudioReady || !gameState.isTyping) return; // Проверяем флаг typing
 
             const oscillator = audioContext.createOscillator();
             const gainNode = audioContext.createGain();
@@ -300,18 +328,93 @@
             oscillator.stop(audioContext.currentTime + 0.1);
         }
 
+        // НОВЫЙ ЗВУК ДЛЯ ПРЫЖКА
+        function playJumpSound() {
+            if (!isAudioReady) return;
+
+            const now = audioContext.currentTime;
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            // Быстрый восходящий тон
+            oscillator.type = 'triangle';
+            oscillator.frequency.setValueAtTime(440, now);
+            oscillator.frequency.linearRampToValueAtTime(600, now + 0.15);
+
+            // Быстрая огибающая
+            gainNode.gain.setValueAtTime(0.15, now);
+            gainNode.gain.linearRampToValueAtTime(0.0001, now + 0.2);
+
+            oscillator.start(now);
+            oscillator.stop(now + 0.2);
+        }
+
+        // НОВЫЙ ГРУСТНЫЙ ЗВУК ДЛЯ ПРОИГРЫША
+        function playGameOverSound() {
+            if (!isAudioReady) return;
+
+            const now = audioContext.currentTime;
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+
+            // Низкая, диссонирующая частота
+            oscillator.type = 'sawtooth';
+            oscillator.frequency.setValueAtTime(80, now);
+            oscillator.frequency.linearRampToValueAtTime(70, now + 0.5);
+
+            // Медленное затухание
+            gainNode.gain.setValueAtTime(0.5, now);
+            gainNode.gain.linearRampToValueAtTime(0.0001, now + 1.5);
+
+            oscillator.start(now);
+            oscillator.stop(now + 1.5);
+        }
+
         // --- TYPEWRITER EFFECT / ДИАЛОГИ ---
         async function typewriterEffect(element, fullText, speed = 30) {
-            element.innerHTML = '';
+            
+            const isDialogueBox = element.id === 'dialogue-text-content';
+            let textElement; 
+
+            if (isDialogueBox) {
+                element.innerHTML = ''; 
+                textElement = document.createElement('div');
+                textElement.className = 'dialogue-text-wrapper'; 
+                element.appendChild(textElement);
+            } else {
+                textElement = element;
+                textElement.innerHTML = '';
+                textElement.style.whiteSpace = 'pre-wrap';
+            }
+
+            gameState.isTyping = true; // Устанавливаем флаг перед началом печати
+
             for (let i = 0; i < fullText.length; i++) {
+                if (!gameState.isTyping) break; // Немедленно останавливаем печать, если флаг сброшен (т.е. игра завершилась)
+
                 if (gameState.isDialogue || !gameState.isRunning) {
                      if (fullText[i] !== '\n' && fullText[i] !== ' ') {
                         playTypewriterSound();
                     }
                 }
-                element.innerHTML += fullText[i];
+                
+                textElement.innerHTML += fullText[i];
+                
+                if (isDialogueBox) {
+                    element.scrollTop = element.scrollHeight; 
+                }
+                
                 await new Promise(resolve => setTimeout(resolve, speed));
             }
+            
+            gameState.isTyping = false; // Сбрасываем флаг после окончания печати
+            return textElement;
         }
         
         function updateSpeakerIcons(speaker) {
@@ -345,15 +448,22 @@
             
             const fullText = speaker ? `${speaker}: \n${text}` : text;
             
-            await typewriterEffect(dialogueTextContent, fullText, 50);
+            // Скорость 70ms (замедление 30% от 50ms)
+            const printedElement = await typewriterEffect(dialogueTextContent, fullText, 70); 
+            
+            // Если печать была прервана из-за конца игры, не показывать кнопку
+            if (!gameState.isTyping && gameState.gameOver) {
+                return;
+            }
 
             const continueButton = document.createElement('button');
             continueButton.className = 'game-button';
             continueButton.textContent = 'Продолжить';
             
             const buttonContainer = document.createElement('div');
-            buttonContainer.style.textAlign = 'center';
+            buttonContainer.className = 'dialogue-button-container';
             buttonContainer.appendChild(continueButton);
+            
             dialogueTextContent.appendChild(buttonContainer);
 
 
@@ -374,7 +484,7 @@
                 distance: 3500,
                 speaker: "Евгений Викторович",
                 // Объединенный текст от Евгения и Олега
-                text: "Здорово, Юра! Куда это ты на ночь глядя? Туман сегодня, аж сгущает тоску. Наш Михаил вон опять на своей 'Волге' застрял, а Алексей с утра кричал, что пиво кончилось. Ха-ха! Кстати, анекдот в тему: 'Идёт мужик по туману, а навстречу ему — собака. Мужик: 'Ты кто?' Собака: 'Гав-гав!' Мужик: 'Ох, как хорошо, что ты сразу сказал! Я-то думал, ты еж!' [Прочистив горло, он продолжает, не давая Юрию и слова сказать]: А ты знаешь, тут Олег свой новый 'Чери Тигго' выкатил. Китайцы, конечно, удивляют. Раньше 'Жигули' были, а теперь вот, у них кроссоверы.  Да они весь мир захватят! Взять хоть экономику. Это как **волновой эффект**. Ты бросаешь камень, и волны расходятся. Так же и с технологиями — один прорыв, и все меняется. Вот и китайские машины — это уже не просто машины, это культурная волна. Понимаешь? Это же как приготовить идеальный **крем-брюле**!  Ты думаешь, это просто? Нет! Нужно аккуратно смешать сливки, желтки и сахар, нагреть до нужной температуры, а потом самое главное — карамельная корочка. Это, Юра, и есть философия жизни: сладкое внутри и хрусткая защита снаружи. Ладно, беги, тебе нельзя задерживаться, время-то! Удачи!",
+                text: "Здорово, Юра! Куда это ты на ночь глядя? Туман сегодня, аж сгущает тоску. Наш Михаил вон опять на своей 'Волге' застрял, а Алексей с утра кричал, что пиво кончилось. Ха-ха! Кстати, анекдот в тему: 'Идёт мужик по туману, а навстречу ему — собака. Мужик: 'Ты кто?' Собака: 'Гав-гав!' Мужик: 'Ох, как хорошо, что ты сразу сказал! Я-то думал, ты еж!'  А ты знаешь, тут Олег свой новый 'Чери Тигго' выкатил. Китайцы, конечно, удивляют. Раньше 'Жигули' были, а теперь вот, у них кроссоверы. Да они весь мир захватят! Взять хоть экономику. Это как **волновой эффект**. Ты бросаешь камень, и волны расходятся. Так же и с технологиями — один прорыв, и все меняется. Вот и китайские машины — это уже не просто машины, это культурная волна. Понимаешь? Это же как приготовить идеальный **крем-брюле**! Ты думаешь, это просто? Нет! Нужно аккуратно смешать сливки, желтки и сахар, нагреть до нужной температуры, а потом самое главное — карамельная корочка. Это, Юра, и есть философия жизни: сладкое внутри и хрусткая защита снаружи. Ладно, беги, тебе нельзя задерживаться, время-то! Удачи!",
                 done: false
             }
         ];
@@ -568,6 +678,7 @@
             if (gameState.yuri.onGround && gameState.isRunning) {
                 gameState.yuri.dy = -15; // Скорость прыжка
                 gameState.yuri.onGround = false;
+                playJumpSound(); // ВОСПРОИЗВЕДЕНИЕ ЗВУКА ПРЫЖКА
             }
         }
 
@@ -581,9 +692,13 @@
         // Добавляем обработчик для тапа по экрану (мобильные устройства)
         if (gameContainer) {
             gameContainer.addEventListener('touchstart', (e) => {
-                // Предотвращаем прокрутку и масштабирование на мобильных
-                e.preventDefault(); 
-                handleJump();
+                // ИСПРАВЛЕНИЕ ДЛЯ МОБИЛЬНЫХ: 
+                // Предотвращаем прыжок, если цель — кнопка или ссылка (т.е. интерактивный элемент).
+                const targetTag = e.target.tagName.toLowerCase();
+                if (targetTag !== 'button' && targetTag !== 'a' && targetTag !== 'div') {
+                    e.preventDefault(); 
+                    handleJump();
+                }
             });
         }
 
@@ -788,10 +903,24 @@
             gameLoop(0);
         }
 
+        // ОБНОВЛЕННАЯ ФУНКЦИЯ endGame
         function endGame(message) {
+            // 1. Остановка печати и звуков пишущей машинки
+            gameState.isTyping = false; 
+            
+            // 2. Закрытие диалогового окна
+            gameState.isDialogue = false;
+            dialogueOverlay.style.display = 'none';
+            dialogueTextContent.innerHTML = '';
+            
             gameState.isRunning = false;
             gameState.gameOver = true;
             
+            // 3. Проигрыш: Воспроизведение грустного звука
+            if (message.includes("Не успел") || message.includes("Проигрыш")) {
+                playGameOverSound();
+            }
+
             gameOverMessage.textContent = message;
             gameOverScreen.style.display = 'flex';
         }
@@ -854,12 +983,19 @@
             }
         }
 
-        // --- ИНИЦИАЛИЗАЦИЯ ---
-        async function initialize() {
+        // Флаг для обеспечения однократного выполнения логики "НАЧАТЬ"
+        let preStartHandled = false;
+
+        async function handlePreStart(e) {
+            // Проверяем, был ли обработчик уже запущен (важно для двойного обработчика click/touchstart)
+            if (preStartHandled) return;
+            preStartHandled = true;
+            
+            if (e) e.preventDefault(); // Останавливаем событие, чтобы избежать двойных тапов
+
             const now = new Date();
             const dateString = `${String(now.getDate()).padStart(2, '0')}.${String(now.getMonth() + 1).padStart(2, '0')}.${now.getFullYear()}`;
 
-            // Обновленный текст без упоминания пикселей
             const introText = `[${dateString}] время 22:59. Где-то на окраине Ростова закончилось пиво. Юрий отправляется в путь.
 
             --- ПРАВИЛА ИГРЫ ---
@@ -870,21 +1006,28 @@
             ВРЕМЯ: Время неумолимо!
             `;
 
-            // Обработчик нажатия "НАЧАТЬ"
-            preStartButton.addEventListener('click', async () => {
-                preStartButton.style.display = 'none';
-                typewriterTextElement.style.display = 'block'; 
 
-                initAudio(); // Активируем AudioContext
-                
-                await typewriterEffect(typewriterTextElement, introText, 40);
-                startButton.style.display = 'block';
+            preStartButton.style.display = 'none';
+            typewriterTextElement.style.display = 'block'; 
 
-                startButton.addEventListener('click', startGame);
-            }, { once: true });
+            initAudio(); // Активируем AudioContext
+            
+            // Скорость 55ms (замедление 30% от 40ms)
+            await typewriterEffect(typewriterTextElement, introText, 55); 
+            startButton.style.display = 'block';
+
+            startButton.addEventListener('click', startGame);
+        }
+
+        // --- ИНИЦИАЛИЗАЦИЯ ---
+        function initialize() {
             
             // Установка иконки Юрия по умолчанию
             speakerLeft.textContent = SPEAKER_ICONS["Юрий"].icon;
+            
+            // ИСПРАВЛЕНИЕ: Используем click И touchstart для максимальной надежности на мобильных устройствах
+            preStartButton.addEventListener('click', handlePreStart);
+            preStartButton.addEventListener('touchstart', handlePreStart); 
         }
 
         initialize();
